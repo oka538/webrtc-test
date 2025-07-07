@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebRTC 1対1 通話サンプル (ICE対応版)</title>
+    <!-- Tailwind CSSを使用してUIを整えます -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Noto+Sans+JP:wght@400;500;700&display=swap"
+        rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Noto Sans JP', 'Inter', sans-serif;
+        }
+
+        video {
+            transform: scaleX(-1);
+            /* 鏡のように反転 */
+            background-color: #2d3748;
+            /* bg-gray-800 */
+        }
+
+        textarea {
+            font-family: monospace;
+            font-size: 0.875rem;
+        }
+    </style>
+</head>
+
+<body class="bg-gray-100 text-gray-800">
+
+    <div class="container mx-auto p-4 md:p-8 max-w-6xl">
+        <h1 class="text-2xl md:text-3xl font-bold text-center mb-4">WebRTC 1対1 通話サンプル</h1>
+        <p class="text-center text-gray-600 mb-8">
+            シグナリングサーバーの代わりに、手動で接続情報（SDPとICE Candidate）を交換します。
+        </p>
+
+        <!-- 映像表示エリア -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+            <div class="bg-white p-4 rounded-lg shadow-md">
+                <h2 class="text-lg font-semibold mb-2">あなたの映像</h2>
+                <video id="localVideo" autoplay playsinline muted class="w-full h-auto rounded"></video>
+            </div>
+            <div class="bg-white p-4 rounded-lg shadow-md">
+                <h2 class="text-lg font-semibold mb-2">相手の映像</h2>
+                <video id="remoteVideo" autoplay playsinline class="w-full h-auto rounded"></video>
+            </div>
+        </div>
+
+        <!-- 操作ボタンエリア -->
+        <div class="bg-white p-4 rounded-lg shadow-md mb-8">
+            <h2 class="text-lg font-semibold mb-4">操作パネル</h2>
+            <div class="flex flex-wrap items-center gap-3">
+                <button id="startButton"
+                    class="bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded-lg transition-transform transform hover:scale-105">1.
+                    カメラを開始</button>
+                <button id="callButton"
+                    class="bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded-lg transition-transform transform hover:scale-105"
+                    disabled>2. 発信 (Offer作成)</button>
+                <button id="hangupButton"
+                    class="bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded-lg transition-transform transform hover:scale-105"
+                    disabled>通話を終了</button>
+            </div>
+        </div>
+
+        <!-- シグナリング（手動交換）エリア -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <!-- 発信者側 -->
+            <div class="bg-white p-4 rounded-lg shadow-md space-y-4">
+                <h3 class="text-xl font-bold text-center">発信者 (Caller)</h3>
+                <div>
+                    <label for="offerSdp" class="font-semibold block mb-1">A. Offer SDP (これを相手に送る)</label>
+                    <textarea id="offerSdp" class="w-full h-24 p-2 border rounded bg-gray-50" readonly
+                        placeholder="ここにOffer SDPが表示されます"></textarea>
+                </div>
+                <div>
+                    <label for="answerSdp" class="font-semibold block mb-1">B. 相手からのAnswer SDP (ここに貼付)</label>
+                    <textarea id="answerSdp" class="w-full h-24 p-2 border rounded"
+                        placeholder="相手からのAnswer SDPをここに貼り付け"></textarea>
+                    <button id="setAnswerButton"
+                        class="mt-2 bg-purple-500 hover:bg-purple-600 text-white font-bold py-2 px-4 rounded-lg w-full transition-colors">4.
+                        Answerを接続</button>
+                </div>
+                <div>
+                    <label for="callerIceCandidates" class="font-semibold block mb-1">C. あなたのICE Candidate
+                        (これを相手に送る)</label>
+                    <textarea id="callerIceCandidates" class="w-full h-24 p-2 border rounded bg-gray-50" readonly
+                        placeholder="ここにICE Candidateが表示されます"></textarea>
+                </div>
+                <div>
+                    <label for="calleeIceCandidates" class="font-semibold block mb-1">D. 相手からのICE Candidate
+                        (ここに貼付)</label>
+                    <textarea id="calleeIceCandidates" class="w-full h-24 p-2 border rounded"
+                        placeholder="相手からのICE Candidateをここに貼り付け"></textarea>
+                    <button id="addCalleeCandidatesButton"
+                        class="mt-2 bg-indigo-500 hover:bg-indigo-600 text-white font-bold py-2 px-4 rounded-lg w-full transition-colors">6.
+                        相手のICEを接続</button>
+                </div>
+            </div>
+
+            <!-- 応答者側 -->
+            <div class="bg-white p-4 rounded-lg shadow-md space-y-4">
+                <h3 class="text-xl font-bold text-center">応答者 (Callee)</h3>
+                <div>
+                    <label for="offerSdpForAnswer" class="font-semibold block mb-1">A. 相手からのOffer SDP (ここに貼付)</label>
+                    <textarea id="offerSdpForAnswer" class="w-full h-24 p-2 border rounded"
+                        placeholder="相手からのOffer SDPをここに貼り付け"></textarea>
+                    <button id="createAnswerButton"
+                        class="mt-2 bg-teal-500 hover:bg-teal-600 text-white font-bold py-2 px-4 rounded-lg w-full transition-colors">3.
+                        応答 (Answer作成)</button>
+                </div>
+                <div>
+                    <label for="answerSdpResult" class="font-semibold block mb-1">B. Answer SDP (これを相手に送る)</label>
+                    <textarea id="answerSdpResult" class="w-full h-24 p-2 border rounded bg-gray-50" readonly
+                        placeholder="ここにAnswer SDPが表示されます"></textarea>
+                </div>
+                <div>
+                    <label for="calleeIceCandidatesForCaller" class="font-semibold block mb-1">C. 相手からのICE Candidate
+                        (ここに貼付)</label>
+                    <textarea id="calleeIceCandidatesForCaller" class="w-full h-24 p-2 border rounded"
+                        placeholder="相手からのICE Candidateをここに貼り付け"></textarea>
+                    <button id="addCallerCandidatesButton"
+                        class="mt-2 bg-indigo-500 hover:bg-indigo-600 text-white font-bold py-2 px-4 rounded-lg w-full transition-colors">5.
+                        相手のICEを接続</button>
+                </div>
+                <div>
+                    <label for="callerIceCandidatesResult" class="font-semibold block mb-1">D. あなたのICE Candidate
+                        (これを相手に送る)</label>
+                    <textarea id="callerIceCandidatesResult" class="w-full h-24 p-2 border rounded bg-gray-50" readonly
+                        placeholder="ここにICE Candidateが表示されます"></textarea>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // DOM要素の取得
+        const startButton = document.getElementById('startButton');
+        const callButton = document.getElementById('callButton');
+        const hangupButton = document.getElementById('hangupButton');
+        const setAnswerButton = document.getElementById('setAnswerButton');
+        const createAnswerButton = document.getElementById('createAnswerButton');
+        const addCalleeCandidatesButton = document.getElementById('addCalleeCandidatesButton');
+        const addCallerCandidatesButton = document.getElementById('addCallerCandidatesButton');
+
+        const localVideo = document.getElementById('localVideo');
+        const remoteVideo = document.getElementById('remoteVideo');
+
+        const offerSdp = document.getElementById('offerSdp');
+        const answerSdp = document.getElementById('answerSdp');
+        const callerIceCandidates = document.getElementById('callerIceCandidates');
+        const calleeIceCandidates = document.getElementById('calleeIceCandidates');
+
+        const offerSdpForAnswer = document.getElementById('offerSdpForAnswer');
+        const answerSdpResult = document.getElementById('answerSdpResult');
+        const calleeIceCandidatesForCaller = document.getElementById('calleeIceCandidatesForCaller');
+        const callerIceCandidatesResult = document.getElementById('callerIceCandidatesResult');
+
+        // グローバル変数
+        let localStream;
+        let peerConnection;
+        // Googleが提供しているパブリックなSTUNサーバーを利用
+        const stunServers = {
+            iceServers: [{
+                urls: 'stun:stun.l.google.com:19302'
+            }]
+        };
+
+        // --- 共通のPeerConnection初期化処理 ---
+        const createPeerConnection = (iceCandidatesTextarea) => {
+            const pc = new RTCPeerConnection(stunServers);
+
+            // ICE Candidateが見つかったときの処理
+            pc.onicecandidate = event => {
+                if (event.candidate) {
+                    // 見つかったICE Candidateをテキストエリアに追記
+                    iceCandidatesTextarea.value += JSON.stringify(event.candidate) + '\n';
+                }
+            };
+
+            // リモートの映像/音声トラックを受信したときの処理
+            pc.ontrack = event => {
+                if (remoteVideo.srcObject !== event.streams[0]) {
+                    remoteVideo.srcObject = event.streams[0];
+                }
+            };
+
+            // ローカルの映像/音声トラックをPeerConnectionに追加
+            localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+
+            return pc;
+        };
+
+        // --- 1. カメラを開始 ---
+        startButton.onclick = async () => {
+            try {
+                localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+                localVideo.srcObject = localStream;
+                startButton.disabled = true;
+                callButton.disabled = false;
+                hangupButton.disabled = false;
+            } catch (e) {
+                console.error('カメラの取得に失敗しました。', e);
+                alert('カメラへのアクセスが許可されませんでした。HTTPS環境で実行しているか確認してください。');
+            }
+        };
+
+        // --- 2. 発信 (Offerの作成) ---
+        callButton.onclick = async () => {
+            peerConnection = createPeerConnection(callerIceCandidates);
+            const offer = await peerConnection.createOffer();
+            await peerConnection.setLocalDescription(offer);
+            offerSdp.value = JSON.stringify(peerConnection.localDescription);
+            callButton.disabled = true;
+        };
+
+        // --- 3. 応答 (Answerの作成) ---
+        createAnswerButton.onclick = async () => {
+            if (!offerSdpForAnswer.value) return alert('相手のOffer SDPを貼り付けてください。');
+            if (!localStream) return alert('先にカメラを開始してください。');
+
+            peerConnection = createPeerConnection(callerIceCandidatesResult);
+            const offer = JSON.parse(offerSdpForAnswer.value);
+            await peerConnection.setRemoteDescription(offer);
+            const answer = await peerConnection.createAnswer();
+            await peerConnection.setLocalDescription(answer);
+            answerSdpResult.value = JSON.stringify(peerConnection.localDescription);
+        };
+
+        // --- 4. Answerを接続 ---
+        setAnswerButton.onclick = async () => {
+            if (!answerSdp.value) return alert('相手のAnswer SDPを貼り付けてください。');
+            const answer = JSON.parse(answerSdp.value);
+            if (peerConnection && !peerConnection.currentRemoteDescription) {
+                await peerConnection.setRemoteDescription(answer);
+            }
+        };
+
+        // --- 5 & 6. 相手のICE Candidateを追加 ---
+        const addIceCandidates = async (candidatesTextarea) => {
+            if (!peerConnection) return alert('先に接続を開始してください。');
+            const candidates = candidatesTextarea.value.trim().split('\n');
+            for (const candidateStr of candidates) {
+                if (candidateStr) {
+                    try {
+                        const candidate = JSON.parse(candidateStr);
+                        await peerConnection.addIceCandidate(candidate);
+                    } catch (e) {
+                        console.error('ICE Candidateの追加に失敗しました。', e);
+                    }
+                }
+            }
+            candidatesTextarea.value = ''; // 追加後はクリア
+        };
+
+        addCallerCandidatesButton.onclick = () => addIceCandidates(calleeIceCandidatesForCaller);
+        addCalleeCandidatesButton.onclick = () => addIceCandidates(calleeIceCandidates);
+
+
+        // --- 通話を終了 ---
+        hangupButton.onclick = () => {
+            if (peerConnection) {
+                peerConnection.close();
+                peerConnection = null;
+            }
+            if (localStream) {
+                localStream.getTracks().forEach(track => track.stop());
+            }
+            localVideo.srcObject = null;
+            remoteVideo.srcObject = null;
+            // UIリセット
+            location.reload();
+        };
+
+    </script>
+</body>
+
+</html>
